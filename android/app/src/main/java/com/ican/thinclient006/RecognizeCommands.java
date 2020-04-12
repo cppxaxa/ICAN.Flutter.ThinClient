@@ -1,5 +1,7 @@
 package com.ican.thinclient006;
 
+import android.annotation.TargetApi;
+import android.os.Build;
 import android.util.Log;
 import android.util.Pair;
 
@@ -9,9 +11,10 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 
-public class RecognizeCommands {
+@TargetApi(Build.VERSION_CODES.GINGERBREAD)
+class RecognizeCommands {
     // Configuration settings.
-    private List<String> labels = new ArrayList<String>();
+    private List<String> labels;
     private long averageWindowDurationMs;
     private float detectionThreshold;
     private int suppressionMs;
@@ -28,7 +31,7 @@ public class RecognizeCommands {
     private static final String SILENCE_LABEL = "_silence_";
     private static final long MINIMUM_TIME_FRACTION = 4;
 
-    public RecognizeCommands(
+    RecognizeCommands(
             List<String> inLabels,
             long inAverageWindowDurationMs,
             float inDetectionThreshold,
@@ -48,12 +51,12 @@ public class RecognizeCommands {
     }
 
     /** Holds information about what's been recognized. */
-    public static class RecognitionResult {
-        public final String foundCommand;
-        public final float score;
-        public final boolean isNewCommand;
+    static class RecognitionResult {
+        final String foundCommand;
+        final float score;
+        final boolean isNewCommand;
 
-        public RecognitionResult(String inFoundCommand, float inScore, boolean inIsNewCommand) {
+        RecognitionResult(String inFoundCommand, float inScore, boolean inIsNewCommand) {
             foundCommand = inFoundCommand;
             score = inScore;
             isNewCommand = inIsNewCommand;
@@ -61,10 +64,10 @@ public class RecognizeCommands {
     }
 
     private static class ScoreForSorting implements Comparable<ScoreForSorting> {
-        public final float score;
-        public final int index;
+        final float score;
+        final int index;
 
-        public ScoreForSorting(float inScore, int inIndex) {
+        ScoreForSorting(float inScore, int inIndex) {
             score = inScore;
             index = inIndex;
         }
@@ -81,7 +84,7 @@ public class RecognizeCommands {
         }
     }
 
-    public RecognitionResult processLatestResults(float[] currentResults, long currentTimeMS) {
+    RecognitionResult processLatestResults(float[] currentResults, long currentTimeMS) {
         if (currentResults.length != labelsCount) {
             throw new RuntimeException(
                     "The results for recognition should contain "
@@ -123,11 +126,11 @@ public class RecognizeCommands {
         final long earliestTime = previousResults.getFirst().first;
         final long samplesDuration = currentTimeMS - earliestTime;
 
-        Log.v("Number of Results: ", String.valueOf(howManyResults));
+        //Log.v("Number of Results: ", String.valueOf(howManyResults));
 
-        Log.v(
-                "Duration < WD/FRAC?",
-                String.valueOf((samplesDuration < (averageWindowDurationMs / MINIMUM_TIME_FRACTION))));
+//        Log.v(
+//                "Duration < WD/FRAC?",
+//                String.valueOf((samplesDuration < (averageWindowDurationMs / MINIMUM_TIME_FRACTION))));
 
         if ((howManyResults < minimumCount)
             //        || (samplesDuration < (averageWindowDurationMs / MINIMUM_TIME_FRACTION))

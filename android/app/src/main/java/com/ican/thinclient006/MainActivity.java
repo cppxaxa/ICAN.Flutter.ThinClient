@@ -1,5 +1,6 @@
 package com.ican.thinclient006;
 
+import android.annotation.TargetApi;
 import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -11,6 +12,7 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.BatteryManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
@@ -27,14 +29,17 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.EventObject;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 import androidx.annotation.NonNull;
+import androidx.lifecycle.Lifecycle;
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
+import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.MethodChannel;
 
 public class MainActivity extends FlutterActivity {
@@ -73,12 +78,15 @@ public class MainActivity extends FlutterActivity {
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
 
-    public void hello()
-    {
-        Toast.makeText(getApplicationContext(), "Hello", Toast.LENGTH_SHORT).show();
-    }
+    private static final String CHANNEL = "com.ican.thinclient/stream";
+//    public static final String STREAM = "com.ican.hotworddetection/stream";
+    public static final String TAG = "NativeBackend";
+    public static HotwordDetectionEvent hotwordDetectionEvent = new HotwordDetectionEvent();
 
-    private static final String CHANNEL = "samples.flutter.dev/battery";
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+    }
 
     @Override
     public void configureFlutterEngine(@NonNull FlutterEngine flutterEngine) {
@@ -94,76 +102,61 @@ public class MainActivity extends FlutterActivity {
                         } else {
                             result.error("UNAVAILABLE", "Battery level not available.", null);
                         }
-                    } else {
+                    }
+                    else if (call.method.equals("initHotwordDetection")) {
+                        try {
+                            String actualLabelFilename = LABEL_FILENAME.split("file:///android_asset/", -1)[1];
+                            Log.i(LOG_TAG, "Reading labels from: " + actualLabelFilename);
+                            BufferedReader br = null;
+                            try {
+                                br = new BufferedReader(new InputStreamReader(getAssets().open(actualLabelFilename)));
+                                String line;
+                                while ((line = br.readLine()) != null) {
+                                    labels.add(line);
+                                    if (line.charAt(0) != '_') {
+                                        displayedLabels.add(line.substring(0, 1).toUpperCase() + line.substring(1));
+                                    }
+                                }
+                                br.close();
+                            } catch (IOException e) {
+                                throw new RuntimeException("Problem reading label file!", e);
+                            }
+
+                            // Set up an object to smooth recognition results to increase accuracy.
+                            recognizeCommands =
+                                    new RecognizeCommands(
+                                            labels,
+                                            AVERAGE_WINDOW_DURATION_MS,
+                                            DETECTION_THRESHOLD,
+                                            SUPPRESSION_MS,
+                                            MINIMUM_COUNT,
+                                            MINIMUM_TIME_BETWEEN_SAMPLES_MS);
+
+                            String actualModelFilename = MODEL_FILENAME.split("file:///android_asset/", -1)[1];
+                            try {
+                                tfLite = new Interpreter(loadModelFile(getAssets(), actualModelFilename));
+                                tfLite.setNumThreads(1);
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+
+                            tfLite.resizeInput(0, new int[]{RECORDING_LENGTH, 1});
+                            tfLite.resizeInput(1, new int[]{1});
+
+                            // Start the recording and recognition threads.
+                            requestMicrophonePermission();
+                            startRecording();
+                            startRecognition();
+                        }
+                        catch (Exception e)
+                        {
+                            result.error("HotwordFailure", e.getMessage(), e.getStackTrace());
+                        }
+                        result.success("Init Hotword Detection Success");
+                    }
+                    else {
                         result.notImplemented();
                     }
-
-//                    Thread recordingThread =
-//                            new Thread(
-//                                    new Runnable() {
-//                                        @Override
-//                                        public void run() {
-//                                            for (int i = 0; i < 10; i++) {
-//                                                Log.e("Backend", "Index " + i);
-//                                                try {
-//                                                    Thread.sleep(1000);
-//                                                } catch (InterruptedException e) {
-//                                                    e.printStackTrace();
-//                                                }
-//                                            }
-//                                            runOnUiThread(new Runnable() {
-//                                                public void run() {
-//                                                    Toast.makeText(getApplicationContext(), "Thread completed", Toast.LENGTH_LONG).show();
-//                                                }
-//                                            });
-//                                        }
-//                                    });
-//                    recordingThread.start();
-
-                    Toast.makeText(getApplicationContext(), "Initiated", Toast.LENGTH_SHORT).show();
-
-                    String actualLabelFilename = LABEL_FILENAME.split("file:///android_asset/", -1)[1];
-                    Log.i(LOG_TAG, "Reading labels from: " + actualLabelFilename);
-                    BufferedReader br = null;
-                    try {
-                        br = new BufferedReader(new InputStreamReader(getAssets().open(actualLabelFilename)));
-                        String line;
-                        while ((line = br.readLine()) != null) {
-                            labels.add(line);
-                            if (line.charAt(0) != '_') {
-                                displayedLabels.add(line.substring(0, 1).toUpperCase() + line.substring(1));
-                            }
-                        }
-                        br.close();
-                    } catch (IOException e) {
-                        throw new RuntimeException("Problem reading label file!", e);
-                    }
-
-                    // Set up an object to smooth recognition results to increase accuracy.
-                    recognizeCommands =
-                            new RecognizeCommands(
-                                    labels,
-                                    AVERAGE_WINDOW_DURATION_MS,
-                                    DETECTION_THRESHOLD,
-                                    SUPPRESSION_MS,
-                                    MINIMUM_COUNT,
-                                    MINIMUM_TIME_BETWEEN_SAMPLES_MS);
-
-                    String actualModelFilename = MODEL_FILENAME.split("file:///android_asset/", -1)[1];
-                    try {
-                        tfLite = new Interpreter(loadModelFile(getAssets(), actualModelFilename));
-                        tfLite.setNumThreads(1);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-
-                    tfLite.resizeInput(0, new int[] {RECORDING_LENGTH, 1});
-                    tfLite.resizeInput(1, new int[] {1});
-
-                    // Start the recording and recognition threads.
-                    requestMicrophonePermission();
-                    startRecording();
-                    startRecognition();
                 }
             );
     }
@@ -190,8 +183,6 @@ public class MainActivity extends FlutterActivity {
             batteryLevel = (intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) * 100) /
                     intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
         }
-
-        hello();
 
         return batteryLevel;
     }
@@ -238,6 +229,7 @@ public class MainActivity extends FlutterActivity {
         recordingThread = null;
     }
 
+    @TargetApi(Build.VERSION_CODES.CUPCAKE)
     private void record() {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO);
 
@@ -395,8 +387,8 @@ public class MainActivity extends FlutterActivity {
 
                                     switch (labelName[labelIndex - 2]) {
                                         case "Up":
-                                            Toast.makeText(getApplicationContext(), "Hello World", Toast.LENGTH_SHORT).show();
-                                            break;
+                                            Toast.makeText(getApplicationContext(), "Publishing hotword Up", Toast.LENGTH_SHORT).show();
+                                            hotwordDetectionEvent.PublishHotword("Up");
                                     }
                                 }
 
@@ -518,6 +510,7 @@ public class MainActivity extends FlutterActivity {
         backgroundHandler = new Handler(backgroundThread.getLooper());
     }
 
+    @TargetApi(Build.VERSION_CODES.ECLAIR)
     private void stopBackgroundThread() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
             backgroundThread.quitSafely();
