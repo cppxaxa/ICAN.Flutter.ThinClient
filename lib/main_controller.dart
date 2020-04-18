@@ -1,8 +1,15 @@
+import 'dart:developer';
+
 import 'package:flutter/services.dart';
 
 enum HotwordDetectorState {
     Uninit, InitProcess, Initialized, Failed
 }
+
+enum QaClientState {
+    Uninit, Initialized, Error
+}
+
 class MainController
 {
     HotwordDetectorState hotwordDetectorState = HotwordDetectorState.Uninit;
@@ -66,4 +73,38 @@ class MainController
             batteryLevelCallback(batteryLevel);
     }
     Function batteryLevelCallback;
+
+    QaClientState qaClientState = QaClientState.Uninit;
+    void getAnswerForQuestionInPassage(String passage, String question) async {
+        const String METHOD_CHANNEL = 'com.ican.thinclient/stream';
+
+        if (qaClientState == QaClientState.Error)
+            return;
+
+        if (qaClientState != QaClientState.Uninit) {
+            var method = 'initQaClient';
+
+            try {
+                await MethodChannel(METHOD_CHANNEL).invokeMethod(method);
+                qaClientState = QaClientState.Initialized;
+            } on PlatformException catch (e) {
+                qaClientState = QaClientState.Error;
+                return;
+            }
+        }
+
+        var method = "getAnswerInPassage";
+        String answer;
+        try {
+            answer = await MethodChannel(METHOD_CHANNEL)
+                .invokeMethod(method, {'passage': passage, 'question': question});
+            qaClientState = QaClientState.Initialized;
+        } on PlatformException catch (e) {
+            qaClientState = QaClientState.Error;
+            return;
+        }
+
+        if (qaClientResponseCallback != null) qaClientResponseCallback(answer);
+    }
+    Function qaClientResponseCallback;
 }

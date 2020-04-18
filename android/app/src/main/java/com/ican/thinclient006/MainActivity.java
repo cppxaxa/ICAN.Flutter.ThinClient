@@ -36,11 +36,12 @@ import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 import androidx.annotation.NonNull;
-import androidx.lifecycle.Lifecycle;
+import androidx.annotation.RequiresApi;
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
-import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.MethodChannel;
+import ml.QaAnswer;
+import ml.QaClient;
 
 public class MainActivity extends FlutterActivity {
     // UI elements.
@@ -78,8 +79,9 @@ public class MainActivity extends FlutterActivity {
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
 
+    private QaClient qaClient;
+
     private static final String CHANNEL = "com.ican.thinclient/stream";
-//    public static final String STREAM = "com.ican.hotworddetection/stream";
     public static final String TAG = "NativeBackend";
     public static HotwordDetectionEvent hotwordDetectionEvent = new HotwordDetectionEvent();
 
@@ -88,6 +90,7 @@ public class MainActivity extends FlutterActivity {
         super.onCreate(savedInstanceState);
     }
 
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
     @Override
     public void configureFlutterEngine(@NonNull FlutterEngine flutterEngine) {
         new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL)
@@ -105,48 +108,7 @@ public class MainActivity extends FlutterActivity {
                     }
                     else if (call.method.equals("initHotwordDetection")) {
                         try {
-                            String actualLabelFilename = LABEL_FILENAME.split("file:///android_asset/", -1)[1];
-                            Log.i(LOG_TAG, "Reading labels from: " + actualLabelFilename);
-                            BufferedReader br = null;
-                            try {
-                                br = new BufferedReader(new InputStreamReader(getAssets().open(actualLabelFilename)));
-                                String line;
-                                while ((line = br.readLine()) != null) {
-                                    labels.add(line);
-                                    if (line.charAt(0) != '_') {
-                                        displayedLabels.add(line.substring(0, 1).toUpperCase() + line.substring(1));
-                                    }
-                                }
-                                br.close();
-                            } catch (IOException e) {
-                                throw new RuntimeException("Problem reading label file!", e);
-                            }
-
-                            // Set up an object to smooth recognition results to increase accuracy.
-                            recognizeCommands =
-                                    new RecognizeCommands(
-                                            labels,
-                                            AVERAGE_WINDOW_DURATION_MS,
-                                            DETECTION_THRESHOLD,
-                                            SUPPRESSION_MS,
-                                            MINIMUM_COUNT,
-                                            MINIMUM_TIME_BETWEEN_SAMPLES_MS);
-
-                            String actualModelFilename = MODEL_FILENAME.split("file:///android_asset/", -1)[1];
-                            try {
-                                tfLite = new Interpreter(loadModelFile(getAssets(), actualModelFilename));
-                                tfLite.setNumThreads(1);
-                            } catch (Exception e) {
-                                throw new RuntimeException(e);
-                            }
-
-                            tfLite.resizeInput(0, new int[]{RECORDING_LENGTH, 1});
-                            tfLite.resizeInput(1, new int[]{1});
-
-                            // Start the recording and recognition threads.
-                            requestMicrophonePermission();
-                            startRecording();
-                            startRecognition();
+                            initHotwordDetection();
                         }
                         catch (Exception e)
                         {
@@ -154,11 +116,70 @@ public class MainActivity extends FlutterActivity {
                         }
                         result.success("Init Hotword Detection Success");
                     }
+                    else if (call.method.equals("initQaClient")) {
+                        initQaClient();
+                    }
+                    else if (call.method.equals("unloadQaClient")) {
+                        unloadQaClient();
+                    }
+                    else if (call.method.equals("getAnswerInPassage")) {
+                        String passage = call.argument("passage");
+                        String question = call.argument("question");
+                        List<QaAnswer> answers = answerQuestion(question, passage);
+                        if (answers.size() > 0) {
+                            result.success(answers.get(0).text);
+                        }
+                    }
                     else {
                         result.notImplemented();
                     }
                 }
             );
+    }
+
+    private void initHotwordDetection() {
+        String actualLabelFilename = LABEL_FILENAME.split("file:///android_asset/", -1)[1];
+        Log.i(LOG_TAG, "Reading labels from: " + actualLabelFilename);
+        BufferedReader br = null;
+        try {
+            br = new BufferedReader(new InputStreamReader(getAssets().open(actualLabelFilename)));
+            String line;
+            while ((line = br.readLine()) != null) {
+                labels.add(line);
+                if (line.charAt(0) != '_') {
+                    displayedLabels.add(line.substring(0, 1).toUpperCase() + line.substring(1));
+                }
+            }
+            br.close();
+        } catch (IOException e) {
+            throw new RuntimeException("Problem reading label file!", e);
+        }
+
+        // Set up an object to smooth recognition results to increase accuracy.
+        recognizeCommands =
+                new RecognizeCommands(
+                        labels,
+                        AVERAGE_WINDOW_DURATION_MS,
+                        DETECTION_THRESHOLD,
+                        SUPPRESSION_MS,
+                        MINIMUM_COUNT,
+                        MINIMUM_TIME_BETWEEN_SAMPLES_MS);
+
+        String actualModelFilename = MODEL_FILENAME.split("file:///android_asset/", -1)[1];
+        try {
+            tfLite = new Interpreter(loadModelFile(getAssets(), actualModelFilename));
+            tfLite.setNumThreads(1);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        tfLite.resizeInput(0, new int[]{RECORDING_LENGTH, 1});
+        tfLite.resizeInput(1, new int[]{1});
+
+        // Start the recording and recognition threads.
+        requestMicrophonePermission();
+        startRecording();
+        startRecognition();
     }
 
     /** Memory-map the model file in Assets. */
@@ -525,6 +546,46 @@ public class MainActivity extends FlutterActivity {
         } catch (InterruptedException e) {
             Log.e("amlan", "Interrupted when stopping background thread", e);
         }
+    }
+
+    private List<QaAnswer> answerQuestion(String question, String content) {
+        question = question.trim();
+        if (question.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // Append question mark '?' if not ended with '?'.
+        // This aligns with question format that trains the model.
+        if (!question.endsWith("?")) {
+            question += '?';
+        }
+        final String questionToAsk = question;
+        Boolean questionAnswered = false;
+
+        // Run TF Lite model to get the answer.
+        long beforeTime = System.currentTimeMillis();
+        final List<QaAnswer> answers = qaClient.predict(questionToAsk, content);
+        long afterTime = System.currentTimeMillis();
+        double totalSeconds = (afterTime - beforeTime) / 1000.0;
+
+        if (!answers.isEmpty()) {
+            return answers;
+        }
+
+        return new ArrayList<>();
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    private void initQaClient() {
+        qaClient = new QaClient(getApplicationContext());
+        qaClient.loadModel();
+        qaClient.loadDictionary();
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    private void unloadQaClient() {
+        qaClient.unload();
+        qaClient = null;
     }
 
     @Override
