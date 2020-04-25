@@ -118,16 +118,28 @@ public class MainActivity extends FlutterActivity {
                     }
                     else if (call.method.equals("initQaClient")) {
                         initQaClient();
+                        result.success("success");
                     }
                     else if (call.method.equals("unloadQaClient")) {
                         unloadQaClient();
+                        result.success("success");
                     }
                     else if (call.method.equals("getAnswerInPassage")) {
                         String passage = call.argument("passage");
                         String question = call.argument("question");
-                        List<QaAnswer> answers = answerQuestion(question, passage);
-                        if (answers.size() > 0) {
-                            result.success(answers.get(0).text);
+
+                        Toast.makeText(getApplicationContext(), passage + "\n\n" + question, Toast.LENGTH_SHORT).show();
+
+                        try {
+                            List<QaAnswer> answers = answerQuestion(question, passage);
+                            if (answers.size() > 0 && answers.get(0).pos.logit > 3) {
+                                result.success(answers.get(0).text);
+                            }
+                            else {
+                                result.error("failed", "failed to find answer", "");
+                            }
+                        } catch (Exception ex) {
+                            result.error("failed to find answer with exception", ex.getMessage(), ex.getStackTrace());
                         }
                     }
                     else {
@@ -385,9 +397,6 @@ public class MainActivity extends FlutterActivity {
                     new Runnable() {
                         @Override
                         public void run() {
-
-//                            inferenceTimeTextView.setText(lastProcessingTimeMs + " ms");
-
                             // If we do have a new command, highlight the right list entry.
                             if (!result.foundCommand.startsWith("_") && result.isNewCommand) {
                                 Toast.makeText(getApplicationContext(), "Recognized: " + result.foundCommand, Toast.LENGTH_SHORT).show();
@@ -412,72 +421,6 @@ public class MainActivity extends FlutterActivity {
                                             hotwordDetectionEvent.PublishHotword("Up");
                                     }
                                 }
-
-//                                runOnUiThread(new Runnable() {
-//                                    public void run() {
-//                                        String[] labelName = {
-//                                                "Yes", "No", "Up", "Down", "Left", "Right", "On", "Off", "Stop", "Go"
-//                                        };
-//
-//                                        if (labelIndex - 2 >= 0)
-//                                            Toast.makeText(getApplicationContext(), "Detected: " + labelName[labelIndex - 2], Toast.LENGTH_LONG).show();
-//                                    }
-//                                });
-
-//                                switch (labelIndex - 2) {
-//                                    case 0:
-//                                        selectedTextView = yesTextView;
-//                                        break;
-//                                    case 1:
-//                                        selectedTextView = noTextView;
-//                                        break;
-//                                    case 2:
-//                                        selectedTextView = upTextView;
-//                                        break;
-//                                    case 3:
-//                                        selectedTextView = downTextView;
-//                                        break;
-//                                    case 4:
-//                                        selectedTextView = leftTextView;
-//                                        break;
-//                                    case 5:
-//                                        selectedTextView = rightTextView;
-//                                        break;
-//                                    case 6:
-//                                        selectedTextView = onTextView;
-//                                        break;
-//                                    case 7:
-//                                        selectedTextView = offTextView;
-//                                        break;
-//                                    case 8:
-//                                        selectedTextView = stopTextView;
-//                                        break;
-//                                    case 9:
-//                                        selectedTextView = goTextView;
-//                                        break;
-//                                }
-
-//                                if (selectedTextView != null) {
-////                                    selectedTextView.setBackgroundResource(R.drawable.round_corner_text_bg_selected);
-//                                    final String score = Math.round(result.score * 100) + "%";
-//                                    selectedTextView.setText(selectedTextView.getText() + "\n" + score);
-//                                    selectedTextView.setTextColor(
-//                                            getResources().getColor(android.R.color.holo_orange_light));
-//                                    handler.postDelayed(
-//                                            new Runnable() {
-//                                                @Override
-//                                                public void run() {
-//                                                    String origionalString =
-//                                                            selectedTextView.getText().toString().replace(score, "").trim();
-//                                                    selectedTextView.setText(origionalString);
-////                                                    selectedTextView.setBackgroundResource(
-////                                                            R.drawable.round_corner_text_bg_unselected);
-//                                                    selectedTextView.setTextColor(
-//                                                            getResources().getColor(android.R.color.darker_gray));
-//                                                }
-//                                            },
-//                                            750);
-//                                }
                             }
                         }
                     });
@@ -491,37 +434,6 @@ public class MainActivity extends FlutterActivity {
 
         Log.v(LOG_TAG, "End recognition");
     }
-
-//    @Override
-//    public void onClick(View v) {
-//        if (v.getId() == R.id.plus) {
-//            String threads = threadsTextView.getText().toString().trim();
-//            int numThreads = Integer.parseInt(threads);
-//            numThreads++;
-//            threadsTextView.setText(String.valueOf(numThreads));
-//            //            tfLite.setNumThreads(numThreads);
-//            int finalNumThreads = numThreads;
-//            backgroundHandler.post(() -> tfLite.setNumThreads(finalNumThreads));
-//        } else if (v.getId() == R.id.minus) {
-//            String threads = threadsTextView.getText().toString().trim();
-//            int numThreads = Integer.parseInt(threads);
-//            if (numThreads == 1) {
-//                return;
-//            }
-//            numThreads--;
-//            threadsTextView.setText(String.valueOf(numThreads));
-//            tfLite.setNumThreads(numThreads);
-//            int finalNumThreads = numThreads;
-//            backgroundHandler.post(() -> tfLite.setNumThreads(finalNumThreads));
-//        }
-//    }
-
-//    @Override
-//    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-//        backgroundHandler.post(() -> tfLite.setUseNNAPI(isChecked));
-//        if (isChecked) apiSwitchCompat.setText("NNAPI");
-//        else apiSwitchCompat.setText("TFLITE");
-//    }
 
     private static final String HANDLE_THREAD_NAME = "CameraBackground";
 
@@ -564,14 +476,17 @@ public class MainActivity extends FlutterActivity {
 
         // Run TF Lite model to get the answer.
         long beforeTime = System.currentTimeMillis();
+        Toast.makeText(getApplicationContext(), "going to predict", Toast.LENGTH_LONG).show();
         final List<QaAnswer> answers = qaClient.predict(questionToAsk, content);
         long afterTime = System.currentTimeMillis();
         double totalSeconds = (afterTime - beforeTime) / 1000.0;
 
         if (!answers.isEmpty()) {
+            Toast.makeText(getApplicationContext(), "answers is not empty", Toast.LENGTH_LONG).show();
             return answers;
         }
 
+        Toast.makeText(getApplicationContext(), "answers is empty", Toast.LENGTH_LONG).show();
         return new ArrayList<>();
     }
 

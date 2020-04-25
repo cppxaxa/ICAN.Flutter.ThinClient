@@ -78,10 +78,8 @@ class MainController
     void getAnswerForQuestionInPassage(String passage, String question) async {
         const String METHOD_CHANNEL = 'com.ican.thinclient/stream';
 
-        if (qaClientState == QaClientState.Error)
-            return;
-
-        if (qaClientState != QaClientState.Uninit) {
+        if (qaClientState != QaClientState.Initialized) 
+        {
             var method = 'initQaClient';
 
             try {
@@ -89,6 +87,7 @@ class MainController
                 qaClientState = QaClientState.Initialized;
             } on PlatformException catch (e) {
                 qaClientState = QaClientState.Error;
+                if (qaClientResponseCallback != null) qaClientResponseCallback(method + " " + qaClientState.toString());
                 return;
             }
         }
@@ -96,11 +95,13 @@ class MainController
         var method = "getAnswerInPassage";
         String answer;
         try {
+            if (qaClientResponseCallback != null) qaClientResponseCallback("calling getAnswer");
             answer = await MethodChannel(METHOD_CHANNEL)
                 .invokeMethod(method, {'passage': passage, 'question': question});
             qaClientState = QaClientState.Initialized;
         } on PlatformException catch (e) {
             qaClientState = QaClientState.Error;
+            if (qaClientResponseCallback != null) qaClientResponseCallback(method + " " + qaClientState.toString());
             return;
         }
 

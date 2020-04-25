@@ -75,7 +75,7 @@ public class QaClient implements AutoCloseable {
       tflite = new Interpreter(buffer, opt);
       Log.v(TAG, "TFLite model loaded.");
     } catch (IOException ex) {
-      Log.e(TAG, ex.getMessage());
+      Log.e(TAG, "loadModel failed QaClient.java " + ex.getMessage());
     }
   }
 
@@ -228,7 +228,6 @@ public class QaClient implements AutoCloseable {
   }
 
   /** Convert the answer back to original text form. */
-  @RequiresApi(api = Build.VERSION_CODES.O)
   @WorkerThread
   private static String convertBack(Feature feature, int start, int end) {
      // Shifted index is: index of logits + offset.

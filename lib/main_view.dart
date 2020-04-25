@@ -42,6 +42,8 @@ class _MainHomePageState extends State<MainHomePage> {
     Future<void> getAnswerInPassageCmd() async {
         String passage ="Rameswaram is a town and municipality in the Ramanathapuram district of the Indian state of Tamil Nadu. It is on Pamban Island separated from mainland India by the Pamban channel and is about 40 kilometres from Mannar Island, Sri Lanka. It is in the Gulf of Mannar, at the tip of the Indian peninsula.[1] Pamban Island, also known as Rameswaram Island, is connected to mainland India by the Pamban Bridge. Rameswaram is the terminus of the railway line from Chennai and Madurai. Together with Varanasi, it is considered to be one of the holiest places in India to Hindus, and part of the Char Dham pilgrimage. Rameshwaram is 970 meters from sea coast.";
         String question = "Distance to sea beach";
+        setAnswerOfPassage("Getting answer ...");
+        controller.qaClientResponseCallback = setAnswerOfPassage;
         controller.getAnswerForQuestionInPassage(passage, question);
     }
     void setAnswerOfPassage(String answer) {
