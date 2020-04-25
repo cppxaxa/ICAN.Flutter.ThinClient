@@ -78,7 +78,6 @@ public class MainActivity extends FlutterActivity {
 
     private static final String METHOD_CHANNEL = "com.ican.thinclient/method";
     public static final String TAG = "NativeBackend";
-    public static HotwordDetectionEvent hotwordDetectionEvent = new HotwordDetectionEvent();
 
     private StreamsChannel channel;
     private static final String STREAM_CHANNEL = "com.ican.thinclient/stream";
@@ -419,7 +418,6 @@ public class MainActivity extends FlutterActivity {
                                     switch (labelName[labelIndex - 2]) {
                                         case "Up":
                                             Toast.makeText(getApplicationContext(), "Publishing hotword Up", Toast.LENGTH_SHORT).show();
-                                            hotwordDetectionEvent.PublishHotword("Up");
                                             streamHandler.postMessage("Up");
                                     }
                                 }
