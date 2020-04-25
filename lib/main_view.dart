@@ -30,6 +30,7 @@ class _MainHomePageState extends State<MainHomePage> {
     }
 
     Future<void> initHotwordDetectionCmd() async {
+        controller.hotwordDetectionCallback = hotwordDetectedCallback;
         controller.initHotwordDetectionCallback = setHotwordDetectionState;
         controller.initHotwordDetection();
     }
@@ -37,6 +38,9 @@ class _MainHomePageState extends State<MainHomePage> {
         setState(() {
             _hotwordService = message;
         });
+    }
+    void hotwordDetectedCallback(String message) {
+        print("hotwordDetectedCallback: " + message);
     }
     
     Future<void> getAnswerInPassageCmd() async {

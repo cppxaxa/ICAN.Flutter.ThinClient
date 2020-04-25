@@ -1,5 +1,6 @@
 package com.ican.thinclient006;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.ContextWrapper;
 import android.content.Intent;
@@ -13,10 +14,8 @@ import android.media.MediaRecorder;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import org.tensorflow.lite.Interpreter;
@@ -29,24 +28,24 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.EventObject;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.RequiresApi;
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
+import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.MethodChannel;
 import ml.QaAnswer;
 import ml.QaClient;
 
+import app.loup.streams_channel.StreamsChannel;
+
 public class MainActivity extends FlutterActivity {
     // UI elements.
     private static final int REQUEST_RECORD_AUDIO = 13;
-    private static final String LOG_TAG = MainActivity.class.getSimpleName();
 
     // Working variables.
     short[] recordingBuffer = new short[RECORDING_LENGTH];
@@ -57,14 +56,14 @@ public class MainActivity extends FlutterActivity {
     private Thread recognitionThread;
     private final ReentrantLock recordingBufferLock = new ReentrantLock();
 
-    private List<String> labels = new ArrayList<String>();
+    private List<String> labels = new ArrayList<>();
     private List<String> displayedLabels = new ArrayList<>();
     private RecognizeCommands recognizeCommands = null;
     private Interpreter tfLite;
 
     private static final int SAMPLE_RATE = 16000;
     private static final int SAMPLE_DURATION_MS = 1000;
-    private static final int RECORDING_LENGTH = (int) (SAMPLE_RATE * SAMPLE_DURATION_MS / 1000);
+    private static final int RECORDING_LENGTH = SAMPLE_RATE * SAMPLE_DURATION_MS / 1000;
     private static final long AVERAGE_WINDOW_DURATION_MS = 1000;
     private static final float DETECTION_THRESHOLD = 0.50f;
     private static final int SUPPRESSION_MS = 1500;
@@ -73,27 +72,32 @@ public class MainActivity extends FlutterActivity {
     private static final String LABEL_FILENAME = "file:///android_asset/conv_actions_labels.txt";
     private static final String MODEL_FILENAME = "file:///android_asset/conv_actions_frozen.tflite";
 
-    private long lastProcessingTimeMs;
-    private Handler handler = new Handler();
-    private TextView selectedTextView = null;
     private HandlerThread backgroundThread;
-    private Handler backgroundHandler;
 
     private QaClient qaClient;
 
-    private static final String CHANNEL = "com.ican.thinclient/stream";
+    private static final String METHOD_CHANNEL = "com.ican.thinclient/method";
     public static final String TAG = "NativeBackend";
     public static HotwordDetectionEvent hotwordDetectionEvent = new HotwordDetectionEvent();
+
+    private StreamsChannel channel;
+    private static final String STREAM_CHANNEL = "com.ican.thinclient/stream";
+    private HotwordStreamHandler streamHandler = new HotwordStreamHandler();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
     @Override
     public void configureFlutterEngine(@NonNull FlutterEngine flutterEngine) {
-        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL)
+        channel = new StreamsChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(),
+                STREAM_CHANNEL
+        );
+        channel.setStreamHandlerFactory(arguments -> streamHandler);
+
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), METHOD_CHANNEL)
             .setMethodCallHandler(
                 (call, result) -> {
                     // Note: this method is invoked on the main thread.
@@ -151,7 +155,7 @@ public class MainActivity extends FlutterActivity {
 
     private void initHotwordDetection() {
         String actualLabelFilename = LABEL_FILENAME.split("file:///android_asset/", -1)[1];
-        Log.i(LOG_TAG, "Reading labels from: " + actualLabelFilename);
+        Log.i(TAG, "Reading labels from: " + actualLabelFilename);
         BufferedReader br = null;
         try {
             br = new BufferedReader(new InputStreamReader(getAssets().open(actualLabelFilename)));
@@ -262,7 +266,6 @@ public class MainActivity extends FlutterActivity {
         recordingThread = null;
     }
 
-    @TargetApi(Build.VERSION_CODES.CUPCAKE)
     private void record() {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO);
 
@@ -284,13 +287,13 @@ public class MainActivity extends FlutterActivity {
                         bufferSize);
 
         if (record.getState() != AudioRecord.STATE_INITIALIZED) {
-            Log.e(LOG_TAG, "Audio Record can't initialize!");
+            Log.e(TAG, "Audio Record can't initialize!");
             return;
         }
 
         record.startRecording();
 
-        Log.v(LOG_TAG, "Start recording");
+        Log.v(TAG, "Start recording");
 
         // Loop, gathering audio data and copying it to a round-robin buffer.
         while (shouldContinue) {
@@ -350,8 +353,7 @@ public class MainActivity extends FlutterActivity {
     }
 
     private void recognize() {
-
-        Log.v(LOG_TAG, "Start recognition");
+        Log.v(TAG, "Start recognition");
 
         short[] inputBuffer = new short[RECORDING_LENGTH];
         float[][] floatInputBuffer = new float[RECORDING_LENGTH][1];
@@ -392,7 +394,6 @@ public class MainActivity extends FlutterActivity {
             long currentTime = System.currentTimeMillis();
             final RecognizeCommands.RecognitionResult result =
                     recognizeCommands.processLatestResults(outputScores[0], currentTime);
-            lastProcessingTimeMs = new Date().getTime() - startTime;
             runOnUiThread(
                     new Runnable() {
                         @Override
@@ -419,6 +420,7 @@ public class MainActivity extends FlutterActivity {
                                         case "Up":
                                             Toast.makeText(getApplicationContext(), "Publishing hotword Up", Toast.LENGTH_SHORT).show();
                                             hotwordDetectionEvent.PublishHotword("Up");
+                                            streamHandler.postMessage("Up");
                                     }
                                 }
                             }
@@ -432,7 +434,7 @@ public class MainActivity extends FlutterActivity {
             }
         }
 
-        Log.v(LOG_TAG, "End recognition");
+        Log.v(TAG, "End recognition");
     }
 
     private static final String HANDLE_THREAD_NAME = "CameraBackground";
@@ -440,7 +442,6 @@ public class MainActivity extends FlutterActivity {
     private void startBackgroundThread() {
         backgroundThread = new HandlerThread(HANDLE_THREAD_NAME);
         backgroundThread.start();
-        backgroundHandler = new Handler(backgroundThread.getLooper());
     }
 
     @TargetApi(Build.VERSION_CODES.ECLAIR)
@@ -454,7 +455,6 @@ public class MainActivity extends FlutterActivity {
         try {
             backgroundThread.join();
             backgroundThread = null;
-            backgroundHandler = null;
         } catch (InterruptedException e) {
             Log.e("amlan", "Interrupted when stopping background thread", e);
         }
@@ -472,14 +472,11 @@ public class MainActivity extends FlutterActivity {
             question += '?';
         }
         final String questionToAsk = question;
-        Boolean questionAnswered = false;
 
         // Run TF Lite model to get the answer.
-        long beforeTime = System.currentTimeMillis();
         Toast.makeText(getApplicationContext(), "going to predict", Toast.LENGTH_LONG).show();
+        @SuppressLint({"NewApi", "LocalSuppress"})
         final List<QaAnswer> answers = qaClient.predict(questionToAsk, content);
-        long afterTime = System.currentTimeMillis();
-        double totalSeconds = (afterTime - beforeTime) / 1000.0;
 
         if (!answers.isEmpty()) {
             Toast.makeText(getApplicationContext(), "answers is not empty", Toast.LENGTH_LONG).show();
@@ -490,14 +487,14 @@ public class MainActivity extends FlutterActivity {
         return new ArrayList<>();
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    @SuppressLint("NewApi")
     private void initQaClient() {
         qaClient = new QaClient(getApplicationContext());
         qaClient.loadModel();
         qaClient.loadDictionary();
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    @SuppressLint("NewApi")
     private void unloadQaClient() {
         qaClient.unload();
         qaClient = null;
@@ -514,5 +511,27 @@ public class MainActivity extends FlutterActivity {
     protected void onStop() {
         super.onStop();
         stopBackgroundThread();
+    }
+
+
+
+    public static class HotwordStreamHandler implements EventChannel.StreamHandler {
+        public void postMessage(String message) {
+            eventSink.success(message);
+        }
+
+        private EventChannel.EventSink eventSink;
+
+        @Override
+        public void onListen(Object o, final EventChannel.EventSink eventSink) {
+            System.out.println("HotwordStreamHandler - onListen: " + o);
+            this.eventSink = eventSink;
+        }
+
+        @Override
+        public void onCancel(Object o) {
+            eventSink.endOfStream();
+            System.out.println("HotwordStreamHandler - onCancel: " + o);
+        }
     }
 }

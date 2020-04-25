@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:developer';
 
 import 'package:flutter/services.dart';
+import 'package:streams_channel/streams_channel.dart';
 
 enum HotwordDetectorState {
     Uninit, InitProcess, Initialized, Failed
@@ -12,6 +14,7 @@ enum QaClientState {
 
 class MainController
 {
+    StreamSubscription<dynamic> hotwordSubscription;
     HotwordDetectorState hotwordDetectorState = HotwordDetectorState.Uninit;
     void initHotwordDetection() async {
         if (hotwordDetectorState != HotwordDetectorState.Uninit) {
@@ -19,7 +22,7 @@ class MainController
             return;
         }
 
-        const String METHOD_CHANNEL = 'com.ican.thinclient/stream';
+        const String METHOD_CHANNEL = 'com.ican.thinclient/method';
         var method = 'initHotwordDetection';
         hotwordDetectorState = HotwordDetectorState.InitProcess;
         String result = hotwordDetectorState.toString();
@@ -30,10 +33,33 @@ class MainController
             result = hotwordDetectorState.toString();
         } on PlatformException catch (e) {
             hotwordDetectorState = HotwordDetectorState.Failed;
-            result = "Failed to get '${method}' from channel '${METHOD_CHANNEL}' with message '${e.message}'.";
+            result = "Failed to get '$method' from channel '$METHOD_CHANNEL' with message '${e.message}'.";
         }
 
         if (initHotwordDetectionCallback != null) initHotwordDetectionCallback(result);
+
+
+        // Hotword subscription
+        const String STREAM_CHANNEL = 'com.ican.thinclient/stream';
+
+        if (hotwordSubscription != null) {
+            hotwordSubscription.cancel();
+            hotwordSubscription = null;
+        }
+        else {
+            StreamsChannel streamsChannel = StreamsChannel(STREAM_CHANNEL);
+            final streamId = "HotwordStreamSubscriberA";
+            hotwordSubscription = streamsChannel
+                .receiveBroadcastStream(streamId)
+                .listen((data) => {
+                    if (hotwordDetectionCallback != null)
+                        hotwordDetectionCallback(data)
+            });
+
+            hotwordSubscription.onDone(() {
+                hotwordSubscription = null;
+            });
+        }
     }
     Function initHotwordDetectionCallback;
     Function hotwordDetectionCallback;
@@ -58,7 +84,7 @@ class MainController
     Function serverCallback;
 
     void requestBatteryLevel() async {
-        const String METHOD_CHANNEL = 'com.ican.thinclient/stream';
+        const String METHOD_CHANNEL = 'com.ican.thinclient/method';
         var method = 'getBatteryLevel';
         String batteryLevel;
 
@@ -76,7 +102,7 @@ class MainController
 
     QaClientState qaClientState = QaClientState.Uninit;
     void getAnswerForQuestionInPassage(String passage, String question) async {
-        const String METHOD_CHANNEL = 'com.ican.thinclient/stream';
+        const String METHOD_CHANNEL = 'com.ican.thinclient/method';
 
         if (qaClientState != QaClientState.Initialized) 
         {
